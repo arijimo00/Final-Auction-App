@@ -8,7 +8,7 @@
   />
   <title>Player Auction System — Cloud Sync</title>
   <style>
-    /* —— ORIGINAL STYLES KEPT (from your file) —— */
+    /* —— ORIGINAL STYLES KEPT —— */
     *{margin:0;padding:0;box-sizing:border-box}
     body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:100vh;color:#333}
     .container{max-width:1400px;margin:0 auto;padding:20px}
@@ -105,7 +105,6 @@
     .pulse-animation{animation:pulse 2s infinite}
     .highlight-bid{background:linear-gradient(135deg,#ffd93d 0%,#ffb347 100%)!important;animation:pulse 1s}
     @keyframes slideIn{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}
-    /* small status strip */
     .room-strip{margin-top:8px;text-align:center;font-size:.9em;color:#555}
     .mono{font-family:ui-monospace, Menlo, Consolas, monospace}
   </style>
@@ -262,9 +261,12 @@ Player1, Player2, Player3"></textarea>
     <div class="admin-console">
       <h2 style="color:#764ba2;margin-bottom:15px;">Admin Console</h2>
       <div class="admin-buttons">
-        <button class="admin-btn start" onclick="startAuction()">▶️ Start Auction</button>
-        <button class="admin-btn pause" onclick="pauseAuction()">⏸️ Pause Auction</button>
-        <button class="admin-btn undo" onclick="undoLastBid()">↩️ Undo Last Bid</button>
+        <button id="start-btn"  class="admin-btn start" onclick="startAuction()">▶️ Start Auction</button>
+        <button id="pause-btn"  class="admin-btn pause" onclick="pauseAuction()">⏸️ Pause Auction</button>
+        <!-- NEW Resume button -->
+        <button id="resume-btn" class="admin-btn start" onclick="resumeAuction()" style="display:none;">▶️ Resume Auction</button>
+
+        <button class="admin-btn undo"  onclick="undoLastBid()">↩️ Undo Last Bid</button>
         <button class="admin-btn reset" onclick="resetAuction()">🔄 Reset Auction</button>
         <button class="admin-btn export" onclick="exportData()">📊 Export to Sheets</button>
       </div>
@@ -275,7 +277,7 @@ Player1, Player2, Player3"></textarea>
       <h2>Bid History</h2>
       <table class="data-table">
         <thead>
-          <tr><th>Timestamp</th><th>Player</th><th>Team</th><th>Bid Amount</th></tr>
+          <tr><th>Timestamp</</th><th>Player</th><th>Team</th><th>Bid Amount</th></tr>
         </thead>
         <tbody id="bid-history"></tbody>
       </table>
@@ -302,19 +304,21 @@ Player1, Player2, Player3"></textarea>
     import {
       getDatabase, ref, onValue, runTransaction, set, get, child, serverTimestamp
     } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-database.js";
+    // (Optional) If you use safer rules with auth, uncomment these:
+    // import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
 
     // 👉 Fill these with your Firebase project values
     const firebaseConfig = {
-      apiKey: "AIzaSyAIvNElUUUa2eo1qcEpQnspGKOnIQzUhOo",
-      authDomain: "dtt-s9-auction.firebaseapp.com",
-      databaseURL: "https://dtt-s9-auction-default-rtdb.firebaseio.com",
-      projectId: "dtt-s9-auction",
-      storageBucket: "dtt-s9-auction.firebasestorage.app",
-      messagingSenderId: "754197878953",
-      appId: "1:754197878953:web:f301e8c0b96ed11c84f1b8",
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_AUTH_DOMAIN",
+      databaseURL: "YOUR_DATABASE_URL",
+      projectId: "YOUR_PROJECT_ID",
+      storageBucket: "YOUR_STORAGE_BUCKET",
+      messagingSenderId: "YOUR_SENDER_ID",
+      appId: "YOUR_APP_ID",
     };
 
-    // Small helper: room from URL (?room=my-auction); if missing, prompt once.
+    // URL room handling
     const url = new URL(window.location.href);
     const roomParam = url.searchParams.get("room") || prompt("Enter a room ID (letters/numbers/dashes):", "season9");
     if (!url.searchParams.get("room")) {
@@ -326,12 +330,30 @@ Player1, Player2, Player3"></textarea>
     document.getElementById("share-link").textContent = window.location.href;
 
     const app = initializeApp(firebaseConfig);
+
+    // Optional auth (uncomment if using auth-required rules)
+    // const auth = getAuth(app);
+    // await signInAnonymously(auth).catch(console.error);
+
     const db = getDatabase(app);
     const roomRef = ref(db, `rooms/${ROOM_ID}`);
     const stateRef = ref(db, `rooms/${ROOM_ID}/state`);
 
     /***********************
-     * Default State (kept from your local version)
+     * Timing configuration
+     ***********************/
+    // Edit these to tune your bidding window behavior:
+    const BID_COOLDOWN_MS = 20_000;  // hidden cooldown before countdown (e.g., 7_500 for 7.5s)
+    const BID_COUNTDOWN_MS = 5_000;  // visible countdown (5s)
+    const NOMINATION_MS = 90_000;    // per-team nomination time
+
+    const resetBidWindow = (s, at = Date.now()) => {
+      s.bidWindowOpensAt = at + BID_COOLDOWN_MS;
+      s.bidWindowEndsAt  = at + BID_COOLDOWN_MS + BID_COUNTDOWN_MS;
+    };
+
+    /***********************
+     * Default State
      ***********************/
     const defaultState = {
       isActive: false,
@@ -350,16 +372,17 @@ Player1, Player2, Player3"></textarea>
       nominationOrder: [],
       currentNominationIndex: 0,
       roundNumber: 1,
-      // cloud timers
-      bidWindowOpensAt: null, // epoch ms
-      bidWindowEndsAt: null,  // epoch ms
-      nominationEndsAt: null  // epoch ms
+      bidWindowOpensAt: null,
+      bidWindowEndsAt: null,
+      nominationEndsAt: null,
+      // pause helper bag (when paused)
+      _pause: null
     };
 
     // Local mirror of state to render UI
     let auctionState = structuredClone(defaultState);
 
-    // Prevent tight finalize loops
+    // Prevent tight loops
     let lastFinalizeAttempt = 0;
     let lastAutoNomAttempt = 0;
 
@@ -378,11 +401,9 @@ Player1, Player2, Player3"></textarea>
       const cloud = snapshot.val();
       if (!cloud) return;
       auctionState = cloud;
-      // Re-render everything whenever state changes
       renderAll();
     });
 
-    // Transaction wrapper that updates the whole state atomically
     function txUpdate(mutator) {
       return runTransaction(stateRef, (s) => {
         const state = s || structuredClone(defaultState);
@@ -392,7 +413,7 @@ Player1, Player2, Player3"></textarea>
     }
 
     /***********************
-     * ——— UI from your original app (render funcs kept) ———
+     * UI builders
      ***********************/
     function initializeTeamSetupTable() {
       const tbody = document.querySelector('#team-setup-table tbody');
@@ -410,7 +431,6 @@ Player1, Player2, Player3"></textarea>
           <td><button class="clear-btn" onclick="clearTeamRow(${i})">Clear</button></td>
         `;
         tbody.appendChild(row);
-        // Attach preview listener
         row.querySelector(`#team-logo-${i}`).addEventListener('change', () => previewLogo(i));
       }
     }
@@ -479,7 +499,6 @@ Player1, Player2, Player3"></textarea>
         container.appendChild(teamCard);
       });
 
-      // Enable/disable bid buttons depending on state
       const disabled = !auctionState.isActive || auctionState.isPaused || !auctionState.currentPlayer;
       document.querySelectorAll('.team-card .bid-btn').forEach(btn => {
         btn.disabled = disabled;
@@ -496,7 +515,7 @@ Player1, Player2, Player3"></textarea>
     function updateBidHistoryTable() {
       const tbody = document.getElementById('bid-history');
       tbody.innerHTML = '';
-      const recentBids = auctionState.bidHistory.slice(-10).reverse();
+      const recentBids = (auctionState.bidHistory || []).slice(-10).reverse();
       recentBids.forEach(bid => {
         const row = tbody.insertRow();
         row.innerHTML = `
@@ -511,7 +530,7 @@ Player1, Player2, Player3"></textarea>
     function updateDraftedPlayersTable() {
       const tbody = document.getElementById('drafted-players');
       tbody.innerHTML = '';
-      auctionState.draftedPlayers.forEach(draft => {
+      (auctionState.draftedPlayers || []).forEach(draft => {
         const row = tbody.insertRow();
         row.innerHTML = `
           <td>${draft.player}</td>
@@ -567,11 +586,11 @@ Player1, Player2, Player3"></textarea>
       const container = document.getElementById('available-players-list');
       const availableCount = document.getElementById('available-count');
       const draftedCount = document.getElementById('drafted-count');
-      availableCount.textContent = auctionState.availablePlayers.length;
-      draftedCount.textContent = auctionState.draftedPlayers.length;
+      availableCount.textContent = (auctionState.availablePlayers || []).length;
+      draftedCount.textContent = (auctionState.draftedPlayers || []).length;
       container.innerHTML = '';
       const searchTerm = (document.getElementById('player-search').value || '').toLowerCase();
-      const filteredPlayers = auctionState.availablePlayers.filter(p => p.toLowerCase().includes(searchTerm));
+      const filteredPlayers = (auctionState.availablePlayers || []).filter(p => p.toLowerCase().includes(searchTerm));
       if (filteredPlayers.length === 0) {
         container.innerHTML = '<div style="text-align:center;color:#666;padding:20px;">No players available. Add players above to get started!</div>';
         return;
@@ -586,43 +605,48 @@ Player1, Player2, Player3"></textarea>
     }
 
     function updateNominatingTeamDisplay() {
-      const idx = auctionState.nominationOrder[auctionState.currentNominationIndex];
+      const idx = (auctionState.nominationOrder || [])[auctionState.currentNominationIndex];
       const team = auctionState.teams[idx];
+      const el = document.getElementById('nomination-team-name');
       if (team) {
-        const el = document.getElementById('nomination-team-name');
         el.textContent = `${team.name}'s Turn`;
         el.style.color = '#dc3545';
         el.style.fontWeight = 'bold';
       } else {
-        const el = document.getElementById('nomination-team-name');
         el.textContent = 'Waiting to Start';
         el.style.color = '#764ba2';
         el.style.fontWeight = 'normal';
       }
     }
 
+    function updateAdminButtons() {
+      const pauseBtn  = document.getElementById('pause-btn');
+      const resumeBtn = document.getElementById('resume-btn');
+      if (!pauseBtn || !resumeBtn) return;
+      pauseBtn.style.display  = (auctionState.isActive && !auctionState.isPaused) ? 'inline-block' : 'none';
+      resumeBtn.style.display = (auctionState.isActive &&  auctionState.isPaused) ? 'inline-block' : 'none';
+    }
+
     function renderAll() {
-      // Header
       document.getElementById('current-player').textContent = auctionState.currentPlayer || '-';
       document.getElementById('current-bid').textContent = auctionState.currentBid ? `₹${auctionState.currentBid}k` : '-';
       document.getElementById('leading-team').textContent = auctionState.leadingTeam || '-';
       document.getElementById('previous-bid').textContent = auctionState.previousBid ? `₹${auctionState.previousBid}k` : '-';
       document.getElementById('previous-leader').textContent = auctionState.previousLeader || '-';
 
-      // Sections
       renderTeams();
       updateTeamRosters();
       updateBidHistoryTable();
       updateDraftedPlayersTable();
       displayAvailablePlayers();
       updateNominatingTeamDisplay();
+      updateAdminButtons();
 
-      // Timer cards mode
       updateTimerCards();
     }
 
     /***********************
-     * Cloud-aware actions (converted from your local functions)
+     * Actions (cloud-aware)
      ***********************/
     window.saveTeamSetup = async function() {
       const teams = [];
@@ -668,65 +692,49 @@ Player1, Player2, Player3"></textarea>
       alert('Sample teams loaded! Click "Save Team Configuration" to apply.');
     };
 
-    window.addPlayers = async function () {
-        const textarea = document.getElementById('player-input');
-        if (!textarea) { alert('Player input box not found.'); return; }
+    window.addPlayers = async function() {
+      const raw = document.getElementById('player-input').value.trim();
+      if (!raw) { alert('Please enter player names'); return; }
+      let newPlayers = raw.includes(',') ? raw.split(',').map(p=>p.trim()) : raw.split('\n').map(p=>p.trim());
+      const unique = [...new Set(newPlayers.map(p=>p.replace(/\s+/g,' ').trim()).filter(Boolean))];
 
-        const raw = (textarea.value || '').trim();
-        if (!raw) { alert('Please enter player names'); return; }
-
-        // Support comma- or line-separated
-        const parsed = raw.includes(',')
-            ? raw.split(',').map(p => p.trim())
-            : raw.split('\n').map(p => p.trim());
-
-        // Deduplicate + clean
-        const candidates = [...new Set(parsed.map(p => p.replace(/\s+/g, ' ').trim()).filter(Boolean))];
-        if (!candidates.length) { alert('No valid player names found.'); return; }
-
-        try {
-            await runTransaction(stateRef, (s) => {
-                const state = s || {};
-                if (!Array.isArray(state.availablePlayers)) state.availablePlayers = [];
-                if (!Array.isArray(state.draftedPlayers))  state.draftedPlayers  = [];
-
-                // Only add players not already available or drafted
-                for (const name of candidates) {
-                    const inAvail  = state.availablePlayers.includes(name);
-                    const inDrafts = state.draftedPlayers.some(d => d && d.player === name);
-                    if (!inAvail && !inDrafts) state.availablePlayers.push(name);
-                }
-            return state;
-            });
-
-            // Clear input; UI will refresh via your onValue(stateRef, ...) listener
-            textarea.value = '';
-        } catch (e) {
-            console.error('Add Players failed:', e);
-            alert('Add Players failed: ' + (e?.message || e));
-        }
-    };
-        
-        window.clearPlayerInput = function(){ document.getElementById('player-input').value=''; };
-
-        window.loadSamplePlayers = function() {
-        const sample = [
-            'Virat Kohli','MS Dhoni','Rohit Sharma','KL Rahul','Hardik Pandya',
-            'Jasprit Bumrah','Ravindra Jadeja','Rishabh Pant','Shikhar Dhawan',
-            'Mohammed Shami','Yuzvendra Chahal','Suryakumar Yadav','Shreyas Iyer',
-            'Axar Patel','Deepak Chahar','Shardul Thakur','Washington Sundar',
-            'Ishan Kishan','Prithvi Shaw','Ruturaj Gaikwad','Shubman Gill',
-            'Mohammed Siraj','Kuldeep Yadav','Bhuvneshwar Kumar','Umesh Yadav'
-        ];
-        document.getElementById('player-input').value = sample.join('\n');
-        };
-
-        window.removePlayer = async function(playerName) {
-        if (!confirm(`Remove ${playerName} from available players?`)) return;
+      try {
         await txUpdate(s => {
-            const i = s.availablePlayers.indexOf(playerName);
-            if (i > -1) s.availablePlayers.splice(i,1);
+          if (!Array.isArray(s.availablePlayers)) s.availablePlayers = [];
+          if (!Array.isArray(s.draftedPlayers))  s.draftedPlayers  = [];
+          unique.forEach(p => {
+            const dupAvail = s.availablePlayers.includes(p);
+            const dupDraft = s.draftedPlayers.some(dp => dp && dp.player === p);
+            if (!dupAvail && !dupDraft) s.availablePlayers.push(p);
+          });
         });
+        document.getElementById('player-input').value = '';
+      } catch (e) {
+        console.error('Add Players failed:', e);
+        alert('Add Players failed: ' + (e?.message || e));
+      }
+    };
+
+    window.clearPlayerInput = function(){ document.getElementById('player-input').value=''; };
+
+    window.loadSamplePlayers = function() {
+      const sample = [
+        'Virat Kohli','MS Dhoni','Rohit Sharma','KL Rahul','Hardik Pandya',
+        'Jasprit Bumrah','Ravindra Jadeja','Rishabh Pant','Shikhar Dhawan',
+        'Mohammed Shami','Yuzvendra Chahal','Suryakumar Yadav','Shreyas Iyer',
+        'Axar Patel','Deepak Chahar','Shardul Thakur','Washington Sundar',
+        'Ishan Kishan','Prithvi Shaw','Ruturaj Gaikwad','Shubman Gill',
+        'Mohammed Siraj','Kuldeep Yadav','Bhuvneshwar Kumar','Umesh Yadav'
+      ];
+      document.getElementById('player-input').value = sample.join('\n');
+    };
+
+    window.removePlayer = async function(playerName) {
+      if (!confirm(`Remove ${playerName} from available players?`)) return;
+      await txUpdate(s => {
+        const i = (s.availablePlayers || []).indexOf(playerName);
+        if (i > -1) s.availablePlayers.splice(i,1);
+      });
     };
 
     window.searchPlayers = function(){ displayAvailablePlayers(); };
@@ -743,62 +751,64 @@ Player1, Player2, Player3"></textarea>
         s.currentNominationIndex = 0;
         s.roundNumber = 1;
         s.currentPlayer = null;
-        s.nominationEndsAt = Date.now() + 90_000; // 1:30
+        s.nominationEndsAt = Date.now() + NOMINATION_MS;
         s.bidWindowOpensAt = null;
         s.bidWindowEndsAt = null;
+        s._pause = null;
       });
       alert('Auction started!');
     };
 
+    // —— PAUSE / RESUME —— //
     window.pauseAuction = async function () {
-    if (!auctionState.isActive) { alert('No active auction to pause/resume'); return; }
+      if (!auctionState.isActive) { alert('No active auction to pause'); return; }
+      if (auctionState.isPaused)  { return; }
 
-    await txUpdate(s => {
-            // init helper bag
-            s._pause = s._pause || { bidOpenIn: null, bidEndIn: null, nomIn: null };
-
+      await txUpdate(s => {
+        s._pause = s._pause || { bidOpenIn: null, bidEndIn: null, nomIn: null };
         const now = Date.now();
 
-        if (!s.isPaused) {
-            // —— PAUSE: capture remaining durations and null out timestamps ——
-            s.isPaused = true;
-
-            // If in a bidding window (either cooldown or visible countdown)
-            if (s.currentPlayer && (s.bidWindowOpensAt || s.bidWindowEndsAt)) {
-                    s._pause.bidOpenIn = (s.bidWindowOpensAt != null) ? Math.max(0, s.bidWindowOpensAt - now) : null;
-                    s._pause.bidEndIn  = (s.bidWindowEndsAt  != null) ? Math.max(0, s.bidWindowEndsAt  - now) : null;
-            } else {
-                    s._pause.bidOpenIn = null;
-                    s._pause.bidEndIn  = null;
-            }
-
-            // If in nomination phase (no current player, nomination timer running)
-            if (!s.currentPlayer && s.nominationEndsAt) {
-                    s._pause.nomIn = Math.max(0, s.nominationEndsAt - now);
-            } else {
-                    s._pause.nomIn = null;
-            }
-
-            // Freeze timers by clearing absolute timestamps
-            s.bidWindowOpensAt = null;
-            s.bidWindowEndsAt  = null;
-            s.nominationEndsAt = null;
-
+        if (s.currentPlayer && (s.bidWindowOpensAt || s.bidWindowEndsAt)) {
+          s._pause.bidOpenIn = (s.bidWindowOpensAt != null) ? Math.max(0, s.bidWindowOpensAt - now) : null;
+          s._pause.bidEndIn  = (s.bidWindowEndsAt  != null) ? Math.max(0, s.bidWindowEndsAt  - now)  : null;
         } else {
-            // —— RESUME: rebuild timestamps from the captured durations ——
-            s.isPaused = false;
+          s._pause.bidOpenIn = null;
+          s._pause.bidEndIn  = null;
+        }
 
-            if (s.currentPlayer) {
-                    if (s._pause.bidOpenIn != null) s.bidWindowOpensAt = now + s._pause.bidOpenIn;
-                    if (s._pause.bidEndIn  != null) s.bidWindowEndsAt  = now + s._pause.bidEndIn;
-            } else if (s._pause.nomIn != null) {
-                    s.nominationEndsAt = now + s._pause.nomIn;
-            }
+        if (!s.currentPlayer && s.nominationEndsAt) {
+          s._pause.nomIn = Math.max(0, s.nominationEndsAt - now);
+        } else {
+          s._pause.nomIn = null;
+        }
+
+        s.isPaused = true;
+        s.bidWindowOpensAt = null;
+        s.bidWindowEndsAt  = null;
+        s.nominationEndsAt = null;
+      });
+    };
+
+    window.resumeAuction = async function () {
+      if (!auctionState.isActive) { alert('No active auction'); return; }
+      if (!auctionState.isPaused) { return; }
+
+      await txUpdate(s => {
+        if (!s.isPaused) return;
+        const now = Date.now();
+        s.isPaused = false;
+
+        if (s.currentPlayer) {
+          if (s._pause?.bidOpenIn != null) s.bidWindowOpensAt = now + s._pause.bidOpenIn;
+          if (s._pause?.bidEndIn  != null) s.bidWindowEndsAt  = now + s._pause.bidEndIn;
+        } else if (s._pause?.nomIn != null) {
+          s.nominationEndsAt = now + s._pause.nomIn;
+        }
 
         s._pause = null;
-        }
-    });
+      });
     };
+
     window.resetAuction = async function() {
       if (!confirm('Reset the entire auction? This will clear all data!')) return;
       await txUpdate(s => {
@@ -829,11 +839,8 @@ Player1, Player2, Player3"></textarea>
         s.bidHistory = s.bidHistory || [];
         s.bidHistory.push({ ts: Date.now(), player: playerName, team: team.name, amount: startingBid });
 
-        // stop nomination timer; start bid window cooldown->countdown (20s + 5s)
         s.nominationEndsAt = null;
-        const now = Date.now();
-        s.bidWindowOpensAt = now + 7_500;
-        s.bidWindowEndsAt  = now + 12_500;
+        resetBidWindow(s, Date.now());
       });
 
       document.getElementById('player-name-input').value = '';
@@ -841,7 +848,7 @@ Player1, Player2, Player3"></textarea>
     };
 
     async function attemptFinalizeBid() {
-      // Debounce attempts across clients
+      if (auctionState.isPaused) return; // guard
       const now = Date.now();
       if (now - lastFinalizeAttempt < 1200) return;
       lastFinalizeAttempt = now;
@@ -851,7 +858,7 @@ Player1, Player2, Player3"></textarea>
         if (!s.bidWindowEndsAt || Date.now() < s.bidWindowEndsAt) return;
 
         const winningTeam = s.teams.find(t => t.name === s.leadingTeam);
-        if (!winningTeam) { // safety
+        if (!winningTeam) {
           // Reset current auction if corrupted
           s.currentPlayer = null;
           s.leadingTeam = null;
@@ -890,29 +897,28 @@ Player1, Player2, Player3"></textarea>
         s.bidWindowOpensAt = null;
         s.bidWindowEndsAt = null;
 
-        // Move to next nomination
+        // Move to next nomination and start nomination timer
         s.currentNominationIndex++;
         if (s.currentNominationIndex >= s.nominationOrder.length) {
           s.currentNominationIndex = 0;
           s.roundNumber++;
         }
-        // Start nomination timer for next team
-        s.nominationEndsAt = Date.now() + 90_000;
+        s.nominationEndsAt = Date.now() + NOMINATION_MS;
       });
     }
 
     async function autoNominateIfDue() {
+      if (auctionState.isPaused) return; // guard
       const now = Date.now();
       if (now - lastAutoNomAttempt < 1200) return;
       lastAutoNomAttempt = now;
 
       await txUpdate(s => {
         if (!s.isActive || s.isPaused) return;
-        if (s.currentPlayer) return; // already nominating/bidding
+        if (s.currentPlayer) return;
         if (!s.nominationEndsAt || Date.now() < s.nominationEndsAt) return;
         if (!s.availablePlayers || s.availablePlayers.length === 0) return;
 
-        // pick random player
         const rp = s.availablePlayers[Math.floor(Math.random() * s.availablePlayers.length)];
         const idx = s.nominationOrder[s.currentNominationIndex];
         const nomTeam = s.teams[idx];
@@ -928,11 +934,8 @@ Player1, Player2, Player3"></textarea>
         s.bidHistory = s.bidHistory || [];
         s.bidHistory.push({ ts: Date.now(), player: rp, team: nomTeam.name, amount: 2 });
 
-        // stop nomination timer; start bid window
         s.nominationEndsAt = null;
-        const t = Date.now();
-        s.bidWindowOpensAt = t + 7_500;
-        s.bidWindowEndsAt  = t + 12_500;
+        resetBidWindow(s, Date.now());
       });
     }
 
@@ -943,7 +946,7 @@ Player1, Player2, Player3"></textarea>
         const team = s.teams[teamId];
         const newBid = (s.currentBid || 0) + increment;
         const maxBid = calcMaxBidCloud(team);
-        if (newBid > maxBid || newBid > team.budget) return; // ignore invalid
+        if (newBid > maxBid || newBid > team.budget) return;
         if (s.currentBid > 0 && s.leadingTeam) {
           s.previousBid = s.currentBid;
           s.previousLeader = s.leadingTeam;
@@ -953,10 +956,7 @@ Player1, Player2, Player3"></textarea>
         s.bidHistory = s.bidHistory || [];
         s.bidHistory.push({ ts: Date.now(), player: s.currentPlayer, team: team.name, amount: newBid });
 
-        // Reset bid window (20s cool + 5s countdown)
-        const now = Date.now();
-        s.bidWindowOpensAt = now + 7_500;
-        s.bidWindowEndsAt  = now + 12_500;
+        resetBidWindow(s, Date.now());
       });
     };
 
@@ -985,9 +985,7 @@ Player1, Player2, Player3"></textarea>
         s.bidHistory = s.bidHistory || [];
         s.bidHistory.push({ ts: Date.now(), player: s.currentPlayer, team: team.name, amount: maxBid });
 
-        const now = Date.now();
-        s.bidWindowOpensAt = now + 7_500;
-        s.bidWindowEndsAt  = now + 12_500;
+        resetBidWindow(s, Date.now());
       });
     };
 
@@ -1013,9 +1011,7 @@ Player1, Player2, Player3"></textarea>
         s.bidHistory = s.bidHistory || [];
         s.bidHistory.push({ ts: Date.now(), player: s.currentPlayer, team: team.name, amount: customBid });
 
-        const now = Date.now();
-        s.bidWindowOpensAt = now + 7_500;
-        s.bidWindowEndsAt  = now + 12_500;
+        resetBidWindow(s, Date.now());
       });
       input.value = '';
     };
@@ -1024,7 +1020,6 @@ Player1, Player2, Player3"></textarea>
       if ((auctionState.bidHistory || []).length <= 1) { alert('No bid to undo!'); return; }
       await txUpdate(s => {
         if (!s.bidHistory || s.bidHistory.length <= 1) return;
-        // Remove last bid
         s.bidHistory.pop();
         const prev = s.bidHistory[s.bidHistory.length - 1];
         if (prev) {
@@ -1033,16 +1028,12 @@ Player1, Player2, Player3"></textarea>
           s.currentBid = prev.amount;
           s.leadingTeam = prev.team;
         } else {
-          // back to initial state of nomination
           s.previousBid = 0;
           s.previousLeader = null;
           s.currentBid = s.initialBid || 0;
           s.leadingTeam = s.nominatingTeam || null;
         }
-        // restart bid window
-        const now = Date.now();
-        s.bidWindowOpensAt = now + 7_500;
-        s.bidWindowEndsAt  = now + 12_500;
+        resetBidWindow(s, Date.now());
       });
     };
 
@@ -1080,18 +1071,28 @@ Player1, Player2, Player3"></textarea>
      * Timers (cloud-synced)
      ***********************/
     function updateTimerCards() {
-      // Bid countdown
+      // If paused: freeze UI and do not process timers
+      if (auctionState.isPaused) {
+        const cdCard = document.getElementById('countdown-timer-card');
+        const ntCard = document.getElementById('nomination-timer-card');
+        cdCard.className = 'timer-card inactive';
+        ntCard.className = 'timer-card inactive';
+        document.getElementById('countdown-timer').textContent = 'PAUSED';
+        document.getElementById('nomination-timer').textContent = 'PAUSED';
+        return;
+      }
+
       const cdCard = document.getElementById('countdown-timer-card');
       const cd = document.getElementById('countdown-timer');
       const openAt = auctionState.bidWindowOpensAt;
       const endAt  = auctionState.bidWindowEndsAt;
       const now = Date.now();
 
-      if (auctionState.currentPlayer && openAt && endAt) {
-        if (now < openAt) {
+      if (auctionState.currentPlayer && (openAt || endAt)) {
+        if (openAt && now < openAt) {
           cdCard.className = 'timer-card inactive';
           cd.textContent = '--';
-        } else if (now >= openAt && now < endAt) {
+        } else if (endAt && now >= (openAt || now) && now < endAt) {
           cdCard.className = 'timer-card active';
           const secs = Math.max(0, Math.ceil((endAt - now)/1000));
           cd.textContent = secs;
@@ -1106,7 +1107,6 @@ Player1, Player2, Player3"></textarea>
         cd.textContent = '--';
       }
 
-      // Nomination timer
       const ntCard = document.getElementById('nomination-timer-card');
       const nt = document.getElementById('nomination-timer');
       const nomEnd = auctionState.nominationEndsAt;
@@ -1120,7 +1120,6 @@ Player1, Player2, Player3"></textarea>
         } else {
           ntCard.className = 'timer-card inactive';
           nt.textContent = '--';
-          // Try auto nominate
           autoNominateIfDue();
         }
       } else {
@@ -1156,14 +1155,10 @@ Player1, Player2, Player3"></textarea>
       });
     }
 
-    // Build empty team setup table on first load (UI only)
     initializeTeamSetupTable();
     setupPlayerAutocomplete();
-
-    // Disable bid buttons / nominate until active (render handles state)
     document.getElementById('nominate-btn').disabled = true;
-
+    updateAdminButtons();
   </script>
 </body>
 </html>
-
