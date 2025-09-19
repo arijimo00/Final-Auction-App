@@ -750,11 +750,55 @@ Player1, Player2, Player3"></textarea>
       alert('Auction started!');
     };
 
-    window.pauseAuction = async function() {
-      if (!auctionState.isActive) { alert('No active auction to pause!'); return; }
-      await txUpdate(s => { s.isPaused = !s.isPaused; });
-    };
+    window.pauseAuction = async function () {
+    if (!auctionState.isActive) { alert('No active auction to pause/resume'); return; }
 
+    await txUpdate(s => {
+            // init helper bag
+            s._pause = s._pause || { bidOpenIn: null, bidEndIn: null, nomIn: null };
+
+        const now = Date.now();
+
+        if (!s.isPaused) {
+            // —— PAUSE: capture remaining durations and null out timestamps ——
+            s.isPaused = true;
+
+            // If in a bidding window (either cooldown or visible countdown)
+            if (s.currentPlayer && (s.bidWindowOpensAt || s.bidWindowEndsAt)) {
+                    s._pause.bidOpenIn = (s.bidWindowOpensAt != null) ? Math.max(0, s.bidWindowOpensAt - now) : null;
+                    s._pause.bidEndIn  = (s.bidWindowEndsAt  != null) ? Math.max(0, s.bidWindowEndsAt  - now) : null;
+            } else {
+                    s._pause.bidOpenIn = null;
+                    s._pause.bidEndIn  = null;
+            }
+
+            // If in nomination phase (no current player, nomination timer running)
+            if (!s.currentPlayer && s.nominationEndsAt) {
+                    s._pause.nomIn = Math.max(0, s.nominationEndsAt - now);
+            } else {
+                    s._pause.nomIn = null;
+            }
+
+            // Freeze timers by clearing absolute timestamps
+            s.bidWindowOpensAt = null;
+            s.bidWindowEndsAt  = null;
+            s.nominationEndsAt = null;
+
+        } else {
+            // —— RESUME: rebuild timestamps from the captured durations ——
+            s.isPaused = false;
+
+            if (s.currentPlayer) {
+                    if (s._pause.bidOpenIn != null) s.bidWindowOpensAt = now + s._pause.bidOpenIn;
+                    if (s._pause.bidEndIn  != null) s.bidWindowEndsAt  = now + s._pause.bidEndIn;
+            } else if (s._pause.nomIn != null) {
+                    s.nominationEndsAt = now + s._pause.nomIn;
+            }
+
+        s._pause = null;
+        }
+    });
+    };
     window.resetAuction = async function() {
       if (!confirm('Reset the entire auction? This will clear all data!')) return;
       await txUpdate(s => {
@@ -1122,3 +1166,4 @@ Player1, Player2, Player3"></textarea>
   </script>
 </body>
 </html>
+
