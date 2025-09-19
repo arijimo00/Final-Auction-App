@@ -308,13 +308,13 @@ Player1, Player2, Player3"></textarea>
 
     // 👉 Fill these with your Firebase project values
     const firebaseConfig = {
-      apiKey: "AIzaSyAIvNElUUUa2eo1qcEpQnspGKOnIQzUhOo",
-      authDomain: "dtt-s9-auction.firebaseapp.com",
-      databaseURL: "https://dtt-s9-auction-default-rtdb.firebaseio.com",
-      projectId: "dtt-s9-auction",
-      storageBucket: "dtt-s9-auction.firebasestorage.app",
-      messagingSenderId: "754197878953",
-      appId: "1:754197878953:web:f301e8c0b96ed11c84f1b8",
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_AUTH_DOMAIN",
+      databaseURL: "YOUR_DATABASE_URL",
+      projectId: "YOUR_PROJECT_ID",
+      storageBucket: "YOUR_STORAGE_BUCKET",
+      messagingSenderId: "YOUR_SENDER_ID",
+      appId: "YOUR_APP_ID",
     };
 
     // Room handling
@@ -340,7 +340,7 @@ Player1, Player2, Player3"></textarea>
      * Timing configuration
      ***********************/
     // Edit these to tune your bidding window behavior:
-    const BID_COOLDOWN_MS = 7_500;  // hidden cooldown before countdown (e.g., 7_500 for 7.5s)
+    const BID_COOLDOWN_MS = 20_000;  // hidden cooldown before countdown (e.g., 7_500 for 7.5s)
     const BID_COUNTDOWN_MS = 5_000;  // visible countdown (5s)
     const NOMINATION_MS    = 90_000; // per-team nomination time
 
@@ -805,40 +805,20 @@ Player1, Player2, Player3"></textarea>
       });
     };
 
-    // —— RESET (resets teams' budgets & rosters; keeps teams & available players) —— //
+    // —— RESET EVERYTHING (teams + players + history + timers) —— //
     window.resetAuction = async function() {
-      if (!confirm('Reset the entire auction? Teams keep their names/logos, but budgets/rosters are reset and all timers/history are cleared.')) return;
-      await txUpdate(s => {
-        // keep teams but reset budgets/players
-        if (Array.isArray(s.teams)) {
-          s.teams.forEach(t => {
-            t.budget = 100;
-            t.players = [];
-          });
-        }
-        // clear auction-derived data
-        s.draftedPlayers = [];
-        s.bidHistory = [];
-        // keep availablePlayers as pool
-        s.isActive = false;
-        s.isPaused = false;
-        s.currentPlayer = null;
-        s.nominatingTeam = null;
-        s.initialBid = 0;
-        s.currentBid = 0;
-        s.leadingTeam = null;
-        s.previousBid = 0;
-        s.previousLeader = null;
-        s.roundNumber = 1;
-        s.bidWindowOpensAt = null;
-        s.bidWindowEndsAt = null;
-        s.nominationEndsAt = null;
-        s._pause = null;
-        // nomination order reset to first team
-        s.nominationOrder = (s.teams || []).map(t => t.id);
-        s.currentNominationIndex = 0;
-      });
-      alert('Auction reset. Configure/start when ready.');
+      if (!confirm('This will remove ALL teams, ALL players, bid history, and timers for this room. Continue?')) return;
+
+      // Replace the entire state with a fresh default object
+      await runTransaction(stateRef, () => structuredClone(defaultState));
+
+      // Clear local UI pieces
+      initializeTeamSetupTable();              // clears team setup inputs + previews
+      document.getElementById('player-input').value = ''; // clear textarea
+      displayAvailablePlayers();               // refresh counts to 0
+      updateAdminButtons();
+
+      alert('Room reset. Add teams and players to start a new auction.');
     };
 
     window.nominatePlayer = async function() {
@@ -1060,6 +1040,8 @@ Player1, Player2, Player3"></textarea>
         }
         resetBidWindow(s, Date.now());
       });
+
+      exportData();
     };
 
     // —— EXPORT: drafted players + team summary + bid history —— //
