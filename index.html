@@ -8,7 +8,7 @@
   />
   <title>Player Auction System — Cloud Sync</title>
   <style>
-    /* —— ORIGINAL STYLES KEPT —— */
+    /* —— STYLES —— */
     *{margin:0;padding:0;box-sizing:border-box}
     body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:100vh;color:#333}
     .container{max-width:1400px;margin:0 auto;padding:20px}
@@ -263,12 +263,11 @@ Player1, Player2, Player3"></textarea>
       <div class="admin-buttons">
         <button id="start-btn"  class="admin-btn start" onclick="startAuction()">▶️ Start Auction</button>
         <button id="pause-btn"  class="admin-btn pause" onclick="pauseAuction()">⏸️ Pause Auction</button>
-        <!-- NEW Resume button -->
         <button id="resume-btn" class="admin-btn start" onclick="resumeAuction()" style="display:none;">▶️ Resume Auction</button>
 
         <button class="admin-btn undo"  onclick="undoLastBid()">↩️ Undo Last Bid</button>
         <button class="admin-btn reset" onclick="resetAuction()">🔄 Reset Auction</button>
-        <button class="admin-btn export" onclick="exportData()">📊 Export to Sheets</button>
+        <button class="admin-btn export" onclick="exportData()">📊 Export</button>
       </div>
     </div>
 
@@ -277,7 +276,7 @@ Player1, Player2, Player3"></textarea>
       <h2>Bid History</h2>
       <table class="data-table">
         <thead>
-          <tr><th>Timestamp</</th><th>Player</th><th>Team</th><th>Bid Amount</th></tr>
+          <tr><th>Timestamp</th><th>Player</th><th>Team</th><th>Bid Amount</th></tr>
         </thead>
         <tbody id="bid-history"></tbody>
       </table>
@@ -302,23 +301,23 @@ Player1, Player2, Player3"></textarea>
      ***********************/
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
     import {
-      getDatabase, ref, onValue, runTransaction, set, get, child, serverTimestamp
+      getDatabase, ref, onValue, runTransaction, set, get, serverTimestamp
     } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-database.js";
-    // (Optional) If you use safer rules with auth, uncomment these:
+    // Optional (if you enforce auth in rules):
     // import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
 
     // 👉 Fill these with your Firebase project values
     const firebaseConfig = {
-      apiKey: "YOUR_API_KEY",
-      authDomain: "YOUR_AUTH_DOMAIN",
-      databaseURL: "YOUR_DATABASE_URL",
-      projectId: "YOUR_PROJECT_ID",
-      storageBucket: "YOUR_STORAGE_BUCKET",
-      messagingSenderId: "YOUR_SENDER_ID",
-      appId: "YOUR_APP_ID",
+      apiKey: "AIzaSyAIvNElUUUa2eo1qcEpQnspGKOnIQzUhOo",
+      authDomain: "dtt-s9-auction.firebaseapp.com",
+      databaseURL: "https://dtt-s9-auction-default-rtdb.firebaseio.com",
+      projectId: "dtt-s9-auction",
+      storageBucket: "dtt-s9-auction.firebasestorage.app",
+      messagingSenderId: "754197878953",
+      appId: "1:754197878953:web:f301e8c0b96ed11c84f1b8",
     };
 
-    // URL room handling
+    // Room handling
     const url = new URL(window.location.href);
     const roomParam = url.searchParams.get("room") || prompt("Enter a room ID (letters/numbers/dashes):", "season9");
     if (!url.searchParams.get("room")) {
@@ -330,10 +329,8 @@ Player1, Player2, Player3"></textarea>
     document.getElementById("share-link").textContent = window.location.href;
 
     const app = initializeApp(firebaseConfig);
-
-    // Optional auth (uncomment if using auth-required rules)
-    // const auth = getAuth(app);
-    // await signInAnonymously(auth).catch(console.error);
+    // If using auth-required rules, uncomment:
+    // const auth = getAuth(app); await signInAnonymously(auth).catch(console.error);
 
     const db = getDatabase(app);
     const roomRef = ref(db, `rooms/${ROOM_ID}`);
@@ -343,9 +340,9 @@ Player1, Player2, Player3"></textarea>
      * Timing configuration
      ***********************/
     // Edit these to tune your bidding window behavior:
-    const BID_COOLDOWN_MS = 20_000;  // hidden cooldown before countdown (e.g., 7_500 for 7.5s)
+    const BID_COOLDOWN_MS = 7_500;  // hidden cooldown before countdown (e.g., 7_500 for 7.5s)
     const BID_COUNTDOWN_MS = 5_000;  // visible countdown (5s)
-    const NOMINATION_MS = 90_000;    // per-team nomination time
+    const NOMINATION_MS    = 90_000; // per-team nomination time
 
     const resetBidWindow = (s, at = Date.now()) => {
       s.bidWindowOpensAt = at + BID_COOLDOWN_MS;
@@ -375,14 +372,10 @@ Player1, Player2, Player3"></textarea>
       bidWindowOpensAt: null,
       bidWindowEndsAt: null,
       nominationEndsAt: null,
-      // pause helper bag (when paused)
       _pause: null
     };
 
-    // Local mirror of state to render UI
     let auctionState = structuredClone(defaultState);
-
-    // Prevent tight loops
     let lastFinalizeAttempt = 0;
     let lastAutoNomAttempt = 0;
 
@@ -460,7 +453,7 @@ Player1, Player2, Player3"></textarea>
     function renderTeams() {
       const container = document.getElementById('teams-container');
       container.innerHTML = '';
-      auctionState.teams.forEach(team => {
+      (auctionState.teams || []).forEach(team => {
         const teamCard = document.createElement('div');
         teamCard.className = 'team-card';
         teamCard.id = `team-${team.id}`;
@@ -475,7 +468,7 @@ Player1, Player2, Player3"></textarea>
             <div class="team-logo">${logoContent || team.name?.charAt(0).toUpperCase()}</div>
             <div class="team-info">
               <h3>${team.name}</h3>
-              <div class="coaches">${team.coaches}</div>
+              <div class="coaches">${team.coaches || ''}</div>
             </div>
           </div>
           <div class="budget-display">
@@ -499,6 +492,7 @@ Player1, Player2, Player3"></textarea>
         container.appendChild(teamCard);
       });
 
+      // Correctly disable/enable bidding controls
       const disabled = !auctionState.isActive || auctionState.isPaused || !auctionState.currentPlayer;
       document.querySelectorAll('.team-card .bid-btn').forEach(btn => {
         btn.disabled = disabled;
@@ -515,7 +509,7 @@ Player1, Player2, Player3"></textarea>
     function updateBidHistoryTable() {
       const tbody = document.getElementById('bid-history');
       tbody.innerHTML = '';
-      const recentBids = (auctionState.bidHistory || []).slice(-10).reverse();
+      const recentBids = (auctionState.bidHistory || []).slice(-50).reverse();
       recentBids.forEach(bid => {
         const row = tbody.insertRow();
         row.innerHTML = `
@@ -542,8 +536,9 @@ Player1, Player2, Player3"></textarea>
 
     function updateTeamRosters() {
       const container = document.getElementById('team-rosters');
+      if (!container) return;
       container.innerHTML = '';
-      auctionState.teams.forEach(team => {
+      (auctionState.teams || []).forEach((team, idx) => {
         const rosterCard = document.createElement('div');
         rosterCard.className = 'roster-card';
         let logoContent = team.logo;
@@ -606,7 +601,7 @@ Player1, Player2, Player3"></textarea>
 
     function updateNominatingTeamDisplay() {
       const idx = (auctionState.nominationOrder || [])[auctionState.currentNominationIndex];
-      const team = auctionState.teams[idx];
+      const team = (auctionState.teams || [])[idx];
       const el = document.getElementById('nomination-team-name');
       if (team) {
         el.textContent = `${team.name}'s Turn`;
@@ -668,10 +663,9 @@ Player1, Player2, Player3"></textarea>
       }
       await txUpdate(s => {
         s.teams = teams;
-        if (!s.nominationOrder || s.nominationOrder.length !== teams.length) {
-          s.nominationOrder = [0,1,2,3,4,5];
-          s.currentNominationIndex = 0;
-        }
+        // ensure nomination order exists
+        s.nominationOrder = teams.map(t => t.id);
+        s.currentNominationIndex = 0;
       });
       alert('Team configuration saved successfully!');
     };
@@ -692,11 +686,13 @@ Player1, Player2, Player3"></textarea>
       alert('Sample teams loaded! Click "Save Team Configuration" to apply.');
     };
 
+    // Firebase-only Add Players (transaction)
     window.addPlayers = async function() {
-      const raw = document.getElementById('player-input').value.trim();
+      const raw = (document.getElementById('player-input').value || '').trim();
       if (!raw) { alert('Please enter player names'); return; }
-      let newPlayers = raw.includes(',') ? raw.split(',').map(p=>p.trim()) : raw.split('\n').map(p=>p.trim());
-      const unique = [...new Set(newPlayers.map(p=>p.replace(/\s+/g,' ').trim()).filter(Boolean))];
+      const parsed = raw.includes(',') ? raw.split(',') : raw.split('\n');
+      const unique = [...new Set(parsed.map(p => p.replace(/\s+/g,' ').trim()).filter(Boolean))];
+      if (!unique.length) { alert('No valid player names found'); return; }
 
       try {
         await txUpdate(s => {
@@ -809,26 +805,59 @@ Player1, Player2, Player3"></textarea>
       });
     };
 
+    // —— RESET (resets teams' budgets & rosters; keeps teams & available players) —— //
     window.resetAuction = async function() {
-      if (!confirm('Reset the entire auction? This will clear all data!')) return;
+      if (!confirm('Reset the entire auction? Teams keep their names/logos, but budgets/rosters are reset and all timers/history are cleared.')) return;
       await txUpdate(s => {
-        Object.assign(s, structuredClone(defaultState));
-        s.nominationOrder = [0,1,2,3,4,5];
+        // keep teams but reset budgets/players
+        if (Array.isArray(s.teams)) {
+          s.teams.forEach(t => {
+            t.budget = 100;
+            t.players = [];
+          });
+        }
+        // clear auction-derived data
+        s.draftedPlayers = [];
+        s.bidHistory = [];
+        // keep availablePlayers as pool
+        s.isActive = false;
+        s.isPaused = false;
+        s.currentPlayer = null;
+        s.nominatingTeam = null;
+        s.initialBid = 0;
+        s.currentBid = 0;
+        s.leadingTeam = null;
+        s.previousBid = 0;
+        s.previousLeader = null;
+        s.roundNumber = 1;
+        s.bidWindowOpensAt = null;
+        s.bidWindowEndsAt = null;
+        s.nominationEndsAt = null;
+        s._pause = null;
+        // nomination order reset to first team
+        s.nominationOrder = (s.teams || []).map(t => t.id);
+        s.currentNominationIndex = 0;
       });
-      alert('Auction reset! Please add players and start again.');
+      alert('Auction reset. Configure/start when ready.');
     };
 
     window.nominatePlayer = async function() {
       if (!auctionState.isActive || auctionState.isPaused) { alert('Auction is not active or is paused!'); return; }
+      const idx = (auctionState.nominationOrder || [])[auctionState.currentNominationIndex];
+      if (idx === undefined || !auctionState.teams[idx]) {
+        alert('Nomination order not set. Save Team Setup first.');
+        return;
+      }
       const playerName = document.getElementById('player-name-input').value.trim();
       const startingBid = parseFloat(document.getElementById('starting-bid-input').value);
       if (!playerName) { alert('Please enter a player name'); return; }
       if (!auctionState.availablePlayers.includes(playerName)) { alert('Player not in available list or already drafted.'); return; }
-      if (!startingBid || startingBid < 2 || (startingBid % 0.5 !== 0)) { alert('Starting bid must be ≥2k in steps of 0.5k'); return; }
+      // 0.5 step validation (tolerant)
+      if (!startingBid || startingBid < 2 || Math.abs(startingBid*2 - Math.round(startingBid*2)) > 1e-9) { alert('Starting bid must be ≥2k in steps of 0.5k'); return; }
 
       await txUpdate(s => {
-        const idx = s.nominationOrder[s.currentNominationIndex];
-        const team = s.teams[idx];
+        const idx2 = s.nominationOrder[s.currentNominationIndex];
+        const team = s.teams[idx2];
         s.currentPlayer = playerName;
         s.nominatingTeam = team.name;
         s.initialBid = startingBid;
@@ -848,7 +877,7 @@ Player1, Player2, Player3"></textarea>
     };
 
     async function attemptFinalizeBid() {
-      if (auctionState.isPaused) return; // guard
+      if (auctionState.isPaused) return;
       const now = Date.now();
       if (now - lastFinalizeAttempt < 1200) return;
       lastFinalizeAttempt = now;
@@ -859,7 +888,6 @@ Player1, Player2, Player3"></textarea>
 
         const winningTeam = s.teams.find(t => t.name === s.leadingTeam);
         if (!winningTeam) {
-          // Reset current auction if corrupted
           s.currentPlayer = null;
           s.leadingTeam = null;
           s.currentBid = 0;
@@ -871,22 +899,18 @@ Player1, Player2, Player3"></textarea>
           return;
         }
 
-        // Deduct budget and add player
         winningTeam.budget -= s.currentBid;
         winningTeam.players = winningTeam.players || [];
         winningTeam.players.push({ name: s.currentPlayer, cost: s.currentBid });
 
-        // Add to drafted list
         s.draftedPlayers = s.draftedPlayers || [];
         s.draftedPlayers.push({ player: s.currentPlayer, team: winningTeam.name, finalBid: s.currentBid });
 
-        // Remove from available players
         if (Array.isArray(s.availablePlayers)) {
           const index = s.availablePlayers.indexOf(s.currentPlayer);
           if (index > -1) s.availablePlayers.splice(index,1);
         }
 
-        // Clear current auction fields
         s.currentPlayer = null;
         s.nominatingTeam = null;
         s.initialBid = 0;
@@ -897,7 +921,6 @@ Player1, Player2, Player3"></textarea>
         s.bidWindowOpensAt = null;
         s.bidWindowEndsAt = null;
 
-        // Move to next nomination and start nomination timer
         s.currentNominationIndex++;
         if (s.currentNominationIndex >= s.nominationOrder.length) {
           s.currentNominationIndex = 0;
@@ -908,7 +931,7 @@ Player1, Player2, Player3"></textarea>
     }
 
     async function autoNominateIfDue() {
-      if (auctionState.isPaused) return; // guard
+      if (auctionState.isPaused) return;
       const now = Date.now();
       if (now - lastAutoNomAttempt < 1200) return;
       lastAutoNomAttempt = now;
@@ -993,8 +1016,10 @@ Player1, Player2, Player3"></textarea>
       if (!auctionState.isActive || auctionState.isPaused || !auctionState.currentPlayer) { alert('No active auction or paused.'); return; }
       const input = document.getElementById(`custom-bid-${teamId}`);
       const customBid = parseFloat(input.value);
-      if (!customBid || customBid <= 0) { alert('Enter a valid bid'); return; }
-      if (customBid % 0.5 !== 0) { alert('Bid must be in increments of 0.5k'); return; }
+      if (!Number.isFinite(customBid) || customBid <= 0) { alert('Enter a valid bid'); return; }
+      // robust 0.5 step
+      if (Math.abs(customBid*2 - Math.round(customBid*2)) > 1e-9) { alert('Bid must be in increments of 0.5k'); return; }
+
       await txUpdate(s => {
         if (!s.currentPlayer) return;
         const team = s.teams[teamId];
@@ -1037,34 +1062,52 @@ Player1, Player2, Player3"></textarea>
       });
     };
 
+    // —— EXPORT: drafted players + team summary + bid history —— //
     window.exportData = function() {
-      if ((auctionState.draftedPlayers || []).length === 0) { alert('No players drafted yet!'); return; }
-      let csv = "Player,Team,Final Bid (k)\n";
-      auctionState.draftedPlayers.forEach(d => {
-        const p = d.player.includes(',') ? `"${d.player}"` : d.player;
-        const t = d.team.includes(',') ? `"${d.team}"` : d.team;
-        csv += `${p},${t},${d.finalBid}\n`;
+      const toCSV = (rows, headers) => {
+        const keys = headers || (rows[0] ? Object.keys(rows[0]) : []);
+        const head = keys.join(",");
+        const lines = rows.map(r => keys.map(k => `"${String((r[k] ?? "")).replace(/"/g,'""')}"`).join(","));
+        return [head, ...lines].join("\n");
+      };
+
+      // Drafted players
+      const drafted = auctionState.draftedPlayers || [];
+      const draftedCsv = toCSV(drafted, ["player","team","finalBid"]);
+
+      // Team summary
+      const teamRows = (auctionState.teams || []).map(t => ({
+        team: t.name,
+        playersDrafted: (t.players || []).length,
+        totalSpent: 100 - t.budget,
+        budgetRemaining: t.budget
+      }));
+      const teamCsv = toCSV(teamRows, ["team","playersDrafted","totalSpent","budgetRemaining"]);
+
+      // Bid history
+      const bids = (auctionState.bidHistory || []).map(b => ({
+        ts: new Date(b.ts || Date.now()).toISOString(),
+        player: b.player, team: b.team, amount: b.amount
+      }));
+      const bidsCsv = toCSV(bids, ["ts","player","team","amount"]);
+
+      const bundle = [
+        {name:`drafted_players.csv`, csv: draftedCsv},
+        {name:`team_summary.csv`, csv: teamCsv},
+        {name:`bid_history.csv`, csv: bidsCsv}
+      ];
+      bundle.forEach(({name,csv}) => {
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url2 = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url2;
+        link.download = name;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url2);
       });
-      csv += "\n\nSummary Statistics\nTeam,Players Drafted,Total Spent (k),Budget Remaining (k)\n";
-      (auctionState.teams || []).forEach(team => {
-        const spent = 100 - team.budget;
-        const count = (team.players || []).length;
-        const tname = team.name.includes(',') ? `"${team.name}"` : team.name;
-        csv += `${tname},${count},${spent},${team.budget}\n`;
-      });
-      const date = new Date();
-      const dateStr = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
-      const timeStr = `${String(date.getHours()).padStart(2,'0')}-${String(date.getMinutes()).padStart(2,'0')}`;
-      const filename = `drafted_players_${dateStr}_${timeStr}_round${auctionState.roundNumber}.csv`;
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      const url2 = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url2;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url2);
+      alert('Export complete!');
     };
 
     /***********************
@@ -1099,7 +1142,6 @@ Player1, Player2, Player3"></textarea>
         } else {
           cdCard.className = 'timer-card inactive';
           cd.textContent = '--';
-          // Try finalize
           attemptFinalizeBid();
         }
       } else {
@@ -1159,6 +1201,7 @@ Player1, Player2, Player3"></textarea>
     setupPlayerAutocomplete();
     document.getElementById('nominate-btn').disabled = true;
     updateAdminButtons();
+    displayAvailablePlayers();
   </script>
 </body>
 </html>
