@@ -671,20 +671,28 @@ Player1, Player2, Player3"></textarea>
     window.addPlayers = async function() {
       const raw = document.getElementById('player-input').value.trim();
       if (!raw) { alert('Please enter player names'); return; }
-      let newPlayers = [];
-      if (raw.includes(',')) newPlayers = raw.split(',').map(p=>p.trim()).filter(Boolean);
-      else newPlayers = raw.split('\n').map(p=>p.trim()).filter(Boolean);
-      const unique = [...new Set(newPlayers)];
-      await txUpdate(s => {
-        if (!Array.isArray(s.availablePlayers)) s.availablePlayers = [];
-        unique.forEach(p => {
-          if (!s.availablePlayers.includes(p) && !s.draftedPlayers.some(dp => dp.player === p)) {
-            s.availablePlayers.push(p);
-          }
+      let newPlayers = raw.includes(',') ? raw.split(',') : raw.split('\n');
+      const unique = [...new Set(newPlayers.map(p => p.trim()).filter(Boolean))];
+    
+      try {
+        await txUpdate(s => {
+          if (!Array.isArray(s.availablePlayers)) s.availablePlayers = [];
+          unique.forEach(p => {
+            if (!s.availablePlayers.includes(p) && !s.draftedPlayers.some(dp => dp.player === p)) {
+              s.availablePlayers.push(p);
+            }
+          });
         });
-      });
+        // (optional) feedback
+        // alert('Players added!');
+      } catch (e) {
+        console.error(e);
+        alert('Add Players failed: ' + (e?.message || e));
+      }
+    
       document.getElementById('player-input').value = '';
     };
+
 
     window.clearPlayerInput = function(){ document.getElementById('player-input').value=''; };
 
@@ -1101,3 +1109,4 @@ Player1, Player2, Player3"></textarea>
   </script>
 </body>
 </html>
+
