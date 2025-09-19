@@ -333,6 +333,15 @@ Player1, Player2, Player3"></textarea>
     // const auth = getAuth(app); await signInAnonymously(auth).catch(console.error);
 
     const db = getDatabase(app);
+    /* === Server time (shared clock) === */
+    let SERVER_OFFSET_MS = 0;
+    // Realtime Database publishes the skew between your device and Firebase servers
+    onValue(ref(db, ".info/serverTimeOffset"), (snap) => {
+      SERVER_OFFSET_MS = snap.val() || 0;
+    });
+    // Always use this instead of Date.now()
+    const serverNow = () => Date.now() + SERVER_OFFSET_MS;
+
     const roomRef = ref(db, `rooms/${ROOM_ID}`);
     const stateRef = ref(db, `rooms/${ROOM_ID}/state`);
 
@@ -344,7 +353,7 @@ Player1, Player2, Player3"></textarea>
     const BID_COUNTDOWN_MS = 5_000;  // visible countdown (5s)
     const NOMINATION_MS    = 90_000; // per-team nomination time
 
-    const resetBidWindow = (s, at = Date.now()) => {
+    const resetBidWindow = (s, at = serverNow()) => {
       s.bidWindowOpensAt = at + BID_COOLDOWN_MS;
       s.bidWindowEndsAt  = at + BID_COOLDOWN_MS + BID_COUNTDOWN_MS;
     };
@@ -747,7 +756,7 @@ Player1, Player2, Player3"></textarea>
         s.currentNominationIndex = 0;
         s.roundNumber = 1;
         s.currentPlayer = null;
-        s.nominationEndsAt = Date.now() + NOMINATION_MS;
+        s.nominationEndsAt = serverNow() + NOMINATION_MS;
         s.bidWindowOpensAt = null;
         s.bidWindowEndsAt = null;
         s._pause = null;
@@ -867,10 +876,10 @@ Player1, Player2, Player3"></textarea>
         s.previousBid = 0;
         s.previousLeader = null;
         s.bidHistory = s.bidHistory || [];
-        s.bidHistory.push({ ts: Date.now(), player: playerName, team: team.name, amount: startingBid });
+        s.bidHistory.push({ ts: serverNow(), player: playerName, team: team.name, amount: startingBid });
 
         s.nominationEndsAt = null;
-        resetBidWindow(s, Date.now());
+        resetBidWindow(s, serverNow());
       });
 
       document.getElementById('player-name-input').value = '';
@@ -879,13 +888,13 @@ Player1, Player2, Player3"></textarea>
 
     async function attemptFinalizeBid() {
       if (auctionState.isPaused) return;
-      const now = Date.now();
+      const now = serverNow();
       if (now - lastFinalizeAttempt < 1200) return;
       lastFinalizeAttempt = now;
 
       await txUpdate(s => {
         if (!s.currentPlayer) return;
-        if (!s.bidWindowEndsAt || Date.now() < s.bidWindowEndsAt) return;
+        if (!s.bidWindowEndsAt || serverNow() < s.bidWindowEndsAt) return;
 
         const winningTeam = s.teams.find(t => t.name === s.leadingTeam);
         if (!winningTeam) {
@@ -927,20 +936,20 @@ Player1, Player2, Player3"></textarea>
           s.currentNominationIndex = 0;
           s.roundNumber++;
         }
-        s.nominationEndsAt = Date.now() + NOMINATION_MS;
+        s.nominationEndsAt = serverNow() + NOMINATION_MS;
       });
     }
 
     async function autoNominateIfDue() {
       if (auctionState.isPaused) return;
-      const now = Date.now();
+      const now = serverNow();
       if (now - lastAutoNomAttempt < 1200) return;
       lastAutoNomAttempt = now;
 
       await txUpdate(s => {
         if (!s.isActive || s.isPaused) return;
         if (s.currentPlayer) return;
-        if (!s.nominationEndsAt || Date.now() < s.nominationEndsAt) return;
+        if (!s.nominationEndsAt || serverNow() < s.nominationEndsAt) return;
         if (!s.availablePlayers || s.availablePlayers.length === 0) return;
 
         const rp = s.availablePlayers[Math.floor(Math.random() * s.availablePlayers.length)];
@@ -956,10 +965,10 @@ Player1, Player2, Player3"></textarea>
         s.previousLeader = null;
 
         s.bidHistory = s.bidHistory || [];
-        s.bidHistory.push({ ts: Date.now(), player: rp, team: nomTeam.name, amount: 2 });
+        s.bidHistory.push({ ts: serverNow(), player: rp, team: nomTeam.name, amount: 2 });
 
         s.nominationEndsAt = null;
-        resetBidWindow(s, Date.now());
+        resetBidWindow(s, serverNow());
       });
     }
 
@@ -978,9 +987,9 @@ Player1, Player2, Player3"></textarea>
         s.currentBid = newBid;
         s.leadingTeam = team.name;
         s.bidHistory = s.bidHistory || [];
-        s.bidHistory.push({ ts: Date.now(), player: s.currentPlayer, team: team.name, amount: newBid });
+        s.bidHistory.push({ ts: serverNow(), player: s.currentPlayer, team: team.name, amount: newBid });
 
-        resetBidWindow(s, Date.now());
+        resetBidWindow(s, serverNow());
       });
     };
 
@@ -1007,9 +1016,9 @@ Player1, Player2, Player3"></textarea>
         s.currentBid = maxBid;
         s.leadingTeam = team.name;
         s.bidHistory = s.bidHistory || [];
-        s.bidHistory.push({ ts: Date.now(), player: s.currentPlayer, team: team.name, amount: maxBid });
+        s.bidHistory.push({ ts: serverNow(), player: s.currentPlayer, team: team.name, amount: maxBid });
 
-        resetBidWindow(s, Date.now());
+        resetBidWindow(s, serverNow());
       });
     };
 
@@ -1035,9 +1044,9 @@ Player1, Player2, Player3"></textarea>
         s.currentBid = customBid;
         s.leadingTeam = team.name;
         s.bidHistory = s.bidHistory || [];
-        s.bidHistory.push({ ts: Date.now(), player: s.currentPlayer, team: team.name, amount: customBid });
+        s.bidHistory.push({ ts: serverNow(), player: s.currentPlayer, team: team.name, amount: customBid });
 
-        resetBidWindow(s, Date.now());
+        resetBidWindow(s, serverNow());
       });
       input.value = '';
     };
@@ -1059,7 +1068,7 @@ Player1, Player2, Player3"></textarea>
           s.currentBid = s.initialBid || 0;
           s.leadingTeam = s.nominatingTeam || null;
         }
-        resetBidWindow(s, Date.now());
+        resetBidWindow(s, serverNow());
       });
     };
 
@@ -1087,7 +1096,7 @@ Player1, Player2, Player3"></textarea>
 
       // Bid history
       const bids = (auctionState.bidHistory || []).map(b => ({
-        ts: new Date(b.ts || Date.now()).toISOString(),
+        ts: new Date(b.ts || serverNow()).toISOString(),
         player: b.player, team: b.team, amount: b.amount
       }));
       const bidsCsv = toCSV(bids, ["ts","player","team","amount"]);
@@ -1130,7 +1139,7 @@ Player1, Player2, Player3"></textarea>
       const cd = document.getElementById('countdown-timer');
       const openAt = auctionState.bidWindowOpensAt;
       const endAt  = auctionState.bidWindowEndsAt;
-      const now = Date.now();
+      const now = serverNow();
 
       if (auctionState.currentPlayer && (openAt || endAt)) {
         if (openAt && now < openAt) {
@@ -1206,3 +1215,4 @@ Player1, Player2, Player3"></textarea>
   </script>
 </body>
 </html>
+
