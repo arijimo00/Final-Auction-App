@@ -668,52 +668,65 @@ Player1, Player2, Player3"></textarea>
       alert('Sample teams loaded! Click "Save Team Configuration" to apply.');
     };
 
-    window.addPlayers = async function() {
-      const raw = document.getElementById('player-input').value.trim();
-      if (!raw) { alert('Please enter player names'); return; }
-      let newPlayers = raw.includes(',') ? raw.split(',') : raw.split('\n');
-      const unique = [...new Set(newPlayers.map(p => p.trim()).filter(Boolean))];
-    
-      try {
+    window.addPlayers = async function () {
+        const textarea = document.getElementById('player-input');
+        if (!textarea) { alert('Player input box not found.'); return; }
+
+        const raw = (textarea.value || '').trim();
+        if (!raw) { alert('Please enter player names'); return; }
+
+        // Support comma- or line-separated
+        const parsed = raw.includes(',')
+            ? raw.split(',').map(p => p.trim())
+            : raw.split('\n').map(p => p.trim());
+
+        // Deduplicate + clean
+        const candidates = [...new Set(parsed.map(p => p.replace(/\s+/g, ' ').trim()).filter(Boolean))];
+        if (!candidates.length) { alert('No valid player names found.'); return; }
+
+        try {
+            await runTransaction(stateRef, (s) => {
+                const state = s || {};
+                if (!Array.isArray(state.availablePlayers)) state.availablePlayers = [];
+                if (!Array.isArray(state.draftedPlayers))  state.draftedPlayers  = [];
+
+                // Only add players not already available or drafted
+                for (const name of candidates) {
+                    const inAvail  = state.availablePlayers.includes(name);
+                    const inDrafts = state.draftedPlayers.some(d => d && d.player === name);
+                    if (!inAvail && !inDrafts) state.availablePlayers.push(name);
+                }
+            return state;
+            });
+
+            // Clear input; UI will refresh via your onValue(stateRef, ...) listener
+            textarea.value = '';
+        } catch (e) {
+            console.error('Add Players failed:', e);
+            alert('Add Players failed: ' + (e?.message || e));
+        }
+    };
+        
+        window.clearPlayerInput = function(){ document.getElementById('player-input').value=''; };
+
+        window.loadSamplePlayers = function() {
+        const sample = [
+            'Virat Kohli','MS Dhoni','Rohit Sharma','KL Rahul','Hardik Pandya',
+            'Jasprit Bumrah','Ravindra Jadeja','Rishabh Pant','Shikhar Dhawan',
+            'Mohammed Shami','Yuzvendra Chahal','Suryakumar Yadav','Shreyas Iyer',
+            'Axar Patel','Deepak Chahar','Shardul Thakur','Washington Sundar',
+            'Ishan Kishan','Prithvi Shaw','Ruturaj Gaikwad','Shubman Gill',
+            'Mohammed Siraj','Kuldeep Yadav','Bhuvneshwar Kumar','Umesh Yadav'
+        ];
+        document.getElementById('player-input').value = sample.join('\n');
+        };
+
+        window.removePlayer = async function(playerName) {
+        if (!confirm(`Remove ${playerName} from available players?`)) return;
         await txUpdate(s => {
-          if (!Array.isArray(s.availablePlayers)) s.availablePlayers = [];
-          unique.forEach(p => {
-            if (!s.availablePlayers.includes(p) && !s.draftedPlayers.some(dp => dp.player === p)) {
-              s.availablePlayers.push(p);
-            }
-          });
+            const i = s.availablePlayers.indexOf(playerName);
+            if (i > -1) s.availablePlayers.splice(i,1);
         });
-        // (optional) feedback
-        // alert('Players added!');
-      } catch (e) {
-        console.error(e);
-        alert('Add Players failed: ' + (e?.message || e));
-      }
-    
-      document.getElementById('player-input').value = '';
-    };
-
-
-    window.clearPlayerInput = function(){ document.getElementById('player-input').value=''; };
-
-    window.loadSamplePlayers = function() {
-      const sample = [
-        'Virat Kohli','MS Dhoni','Rohit Sharma','KL Rahul','Hardik Pandya',
-        'Jasprit Bumrah','Ravindra Jadeja','Rishabh Pant','Shikhar Dhawan',
-        'Mohammed Shami','Yuzvendra Chahal','Suryakumar Yadav','Shreyas Iyer',
-        'Axar Patel','Deepak Chahar','Shardul Thakur','Washington Sundar',
-        'Ishan Kishan','Prithvi Shaw','Ruturaj Gaikwad','Shubman Gill',
-        'Mohammed Siraj','Kuldeep Yadav','Bhuvneshwar Kumar','Umesh Yadav'
-      ];
-      document.getElementById('player-input').value = sample.join('\n');
-    };
-
-    window.removePlayer = async function(playerName) {
-      if (!confirm(`Remove ${playerName} from available players?`)) return;
-      await txUpdate(s => {
-        const i = s.availablePlayers.indexOf(playerName);
-        if (i > -1) s.availablePlayers.splice(i,1);
-      });
     };
 
     window.searchPlayers = function(){ displayAvailablePlayers(); };
@@ -1109,4 +1122,3 @@ Player1, Player2, Player3"></textarea>
   </script>
 </body>
 </html>
-
